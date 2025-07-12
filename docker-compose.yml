@@ -1,0 +1,33 @@
+services:
+  mongodb:
+    image: mongo:latest
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: 546258
+      MONGO_INITDB_DATABASE: vacancy_db
+    volumes:
+      - ./mongodb_data:/data/db
+      - ./init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    networks:
+      - mongodb_network
+
+  app:
+    build: .
+    container_name: vacancy_app
+    depends_on:
+      - mongodb
+    environment:
+      - MONGO_URI=mongodb://root:546258@mongodb:27017/vacancy_db?authSource=admin
+      - BEARER_TOKEN=${BEARER_TOKEN} # Ensure this is set in your environment or .env file
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - mongodb_network
+    entrypoint: ["/app/main"] # Allows passing command-line arguments
+
+networks:
+  mongodb_network:
+    driver: bridge
