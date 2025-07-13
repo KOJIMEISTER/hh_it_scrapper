@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -11,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -45,11 +48,39 @@ type SearchItem struct {
 }
 
 type Vacancy struct {
-	// Define fields as needed; using raw JSON if not needed explicitly
+	// Raw JSON for flexibility
 	RawJSON json.RawMessage `json:"-"`
 }
 
-// Global logger
+// SafeMap is a thread-safe map for string keys and empty struct values
+type SafeMap struct {
+	sync.RWMutex
+	internal map[string]struct{}
+}
+
+// NewSafeMap initializes a new SafeMap
+func NewSafeMap() *SafeMap {
+	return &SafeMap{
+		internal: make(map[string]struct{}),
+	}
+}
+
+// Exists checks if a key exists in the SafeMap
+func (sm *SafeMap) Exists(key string) bool {
+	sm.RLock()
+	defer sm.RUnlock()
+	_, exists := sm.internal[key]
+	return exists
+}
+
+// Add inserts a key into the SafeMap
+func (sm *SafeMap) Add(key string) {
+	sm.Lock()
+	defer sm.Unlock()
+	sm.internal[key] = struct{}{}
+}
+
+// Variables for loggers
 var (
 	successLogger *log.Logger
 	errorLogger   *log.Logger
@@ -57,6 +88,11 @@ var (
 
 func init() {
 	// Initialize loggers
+	err := os.MkdirAll("logs", os.ModePerm)
+	if err != nil {
+		log.Fatalf("Failed to create logs directory: %v", err)
+	}
+
 	successFile, err := os.OpenFile("logs/success.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
 	if err != nil {
 		log.Fatalf("Failed to open success log file: %v", err)
@@ -71,31 +107,30 @@ func init() {
 
 func main() {
 	// Define command-line flags
-	from := flag.String("from", "", "Start date in YYYY-MM-DD format")
-	to := flag.String("to", "", "End date in YYYY-MM-DD format")
+	from := flag.String("from", "", "Start date in YYYY-MM-DD format (required)")
+	to := flag.String("to", "", "End date in YYYY-MM-DD format (required)")
 	flag.Parse()
 
-	var startDate, endDate string
-
-	if *from != "" && *to != "" {
-		startDate = *from
-		endDate = *to
-	} else {
-		// If not provided, default to yesterday and today
-		today := time.Now().Format("2006-01-02")
-		yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
-		startDate = yesterday
-		endDate = today
+	// Validate date arguments
+	if *from == "" || *to == "" {
+		errorLogger.Println("Both --from and --to date arguments must be provided.")
+		fmt.Println("Error: Both --from and --to date arguments must be provided in YYYY-MM-DD format.")
+		os.Exit(1)
 	}
+
+	startDate := *from
+	endDate := *to
 
 	mongoURI := os.Getenv("MONGO_URI")
 	bearerToken := os.Getenv("BEARER_TOKEN")
 
 	if bearerToken == "" {
+		errorLogger.Println("BEARER_TOKEN must be provided")
 		log.Fatal("BEARER_TOKEN must be provided")
 	}
 
 	if mongoURI == "" {
+		errorLogger.Println("MONGO_URI must be provided")
 		log.Fatal("MONGO_URI must be provided")
 	}
 
@@ -103,42 +138,82 @@ func main() {
 	clientOptions := options.Client().ApplyURI(mongoURI)
 	client, err := mongo.Connect(context.TODO(), clientOptions)
 	if err != nil {
-		log.Fatalf("MongoDB connection error: %v", err)
+		errorLogger.Fatalf("MongoDB connection error: %v", err)
 	}
 	defer func() {
 		if err = client.Disconnect(context.TODO()); err != nil {
-			log.Fatalf("MongoDB disconnection error: %v", err)
+			errorLogger.Fatalf("MongoDB disconnection error: %v", err)
 		}
 	}()
 
 	collection := client.Database("vacancy_db").Collection("vacancies")
 
-	// Schedule the job to run once a day
-	ticker := time.NewTicker(24 * time.Hour)
-	defer ticker.Stop()
-
-	// Run the job immediately and then every day
-	runJob(startDate, endDate, collection, bearerToken)
-
-	for range ticker.C {
-		// Update dates for each run to increment the day
-		yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
-		today := time.Now().Format("2006-01-02")
-		runJob(yesterday, today, collection, bearerToken)
+	// Load existing vacancy IDs and description_hashes
+	existingVacancyIDs, existingDescriptionHashes, err := loadExistingData(collection)
+	if err != nil {
+		errorLogger.Fatalf("Failed to load existing data: %v", err)
 	}
-}
 
-func runJob(startDate, endDate string, collection *mongo.Collection, bearerToken string) {
+	// Initialize counters
+	var savedCount int64
+
+	// Run the job
+	startTime := time.Now()
 	log.Println("Job started...")
-	err := fetchAndStoreVacancies(startDate, endDate, collection, bearerToken)
+	err = fetchAndStoreVacancies(startDate, endDate, collection, bearerToken, existingVacancyIDs, existingDescriptionHashes, &savedCount)
 	if err != nil {
 		errorLogger.Printf("Job failed: %v", err)
 	} else {
 		log.Println("Job completed successfully.")
 	}
+	duration := time.Since(startTime)
+	log.Printf("Duration: %v", duration)
+
+	// Display the number of successfully saved vacancies
+	fmt.Printf("Number of successfully saved vacancies: %d\n", savedCount)
 }
 
-func fetchAndStoreVacancies(startDate, endDate string, collection *mongo.Collection, bearerToken string) error {
+func loadExistingData(collection *mongo.Collection) (map[string]struct{}, *SafeMap, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Initialize maps
+	vacancyIDs := make(map[string]struct{})
+	descriptionHashes := NewSafeMap()
+
+	// Create a cursor to iterate over all documents
+	cursor, err := collection.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{
+		{"id", 1},
+		{"description_hash", 1},
+	}))
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to fetch existing vacancies: %v", err)
+	}
+	defer cursor.Close(ctx)
+
+	for cursor.Next(ctx) {
+		var doc struct {
+			ID              string `bson:"id"`
+			DescriptionHash string `bson:"description_hash"`
+		}
+		if err := cursor.Decode(&doc); err != nil {
+			return nil, nil, fmt.Errorf("failed to decode document: %v", err)
+		}
+		vacancyIDs[doc.ID] = struct{}{}
+		if doc.DescriptionHash != "" {
+			descriptionHashes.Add(doc.DescriptionHash)
+		}
+	}
+
+	if err := cursor.Err(); err != nil {
+		return nil, nil, fmt.Errorf("cursor error: %v", err)
+	}
+
+	log.Printf("Loaded %d existing vacancy IDs and %d description hashes from MongoDB.", len(vacancyIDs), len(descriptionHashes.internal))
+	return vacancyIDs, descriptionHashes, nil
+}
+
+func fetchAndStoreVacancies(startDate, endDate string, collection *mongo.Collection, bearerToken string, existingVacancyIDs map[string]struct{}, existingDescriptionHashes *SafeMap, savedCount *int64) error {
 	page := 0
 	var totalPages int
 
@@ -151,7 +226,9 @@ func fetchAndStoreVacancies(startDate, endDate string, collection *mongo.Collect
 		req, err := http.NewRequest("GET", searchURL, nil)
 		if err != nil {
 			errorLogger.Printf("Failed to create request for page %d: %v", page, err)
-			// Proceed to next step or handle accordingly
+			// Proceed to next page
+			page++
+			continue
 		}
 
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", bearerToken))
@@ -160,7 +237,9 @@ func fetchAndStoreVacancies(startDate, endDate string, collection *mongo.Collect
 		resp, err := client.Do(req)
 		if err != nil {
 			errorLogger.Printf("Failed to fetch search page %d: %v", page, err)
-			// Proceed to next step or handle accordingly
+			// Proceed to next page
+			page++
+			continue
 		}
 
 		if resp != nil {
@@ -169,14 +248,18 @@ func fetchAndStoreVacancies(startDate, endDate string, collection *mongo.Collect
 				body, err := ioutil.ReadAll(resp.Body)
 				if err != nil {
 					errorLogger.Printf("Failed to read response body for page %d: %v", page, err)
-					// Proceed to next step
+					// Proceed to next page
+					page++
+					continue
 				}
 
 				var searchResp VacancySearchResponse
 				err = json.Unmarshal(body, &searchResp)
 				if err != nil {
 					errorLogger.Printf("Failed to parse JSON for page %d: %v", page, err)
-					// Proceed to next step
+					// Proceed to next page
+					page++
+					continue
 				}
 
 				// On the first page, set totalPages
@@ -185,14 +268,18 @@ func fetchAndStoreVacancies(startDate, endDate string, collection *mongo.Collect
 					log.Printf("Total pages to fetch: %d", totalPages)
 				}
 
-				// Extract vacancy IDs
+				// Extract vacancy IDs, excluding those already in DB
 				var vacancyIDs []string
 				for _, item := range searchResp.Items {
-					vacancyIDs = append(vacancyIDs, item.ID)
+					if _, exists := existingVacancyIDs[item.ID]; !exists {
+						vacancyIDs = append(vacancyIDs, item.ID)
+					}
 				}
 
+				log.Printf("Processing page %d: %d new vacancies found.", page, len(vacancyIDs))
+
 				// Fetch vacancy details asynchronously
-				err = fetchVacancyDetails(vacancyIDs, collection, bearerToken)
+				err = fetchVacancyDetails(vacancyIDs, collection, bearerToken, existingDescriptionHashes, savedCount)
 				if err != nil {
 					errorLogger.Printf("Failed to fetch vacancy details on page %d: %v", page, err)
 				}
@@ -208,14 +295,14 @@ func fetchAndStoreVacancies(startDate, endDate string, collection *mongo.Collect
 					resp.StatusCode == http.StatusForbidden ||
 					resp.StatusCode == http.StatusNotFound {
 					errorLogger.Printf("Error fetching page %d: HTTP %d", page, resp.StatusCode)
-					// Proceed to next step
+					// Proceed to next page
 					if page >= totalPages-1 {
 						break
 					}
 					page++
 				} else {
 					errorLogger.Printf("Unexpected HTTP status %d on page %d", resp.StatusCode, page)
-					// You might decide to retry or skip
+					// Proceed to next page
 					if page >= totalPages-1 {
 						break
 					}
@@ -225,9 +312,7 @@ func fetchAndStoreVacancies(startDate, endDate string, collection *mongo.Collect
 		} else {
 			// If response is nil due to an error during GET
 			errorLogger.Printf("Received nil response for page %d", page)
-			if page >= totalPages-1 {
-				break
-			}
+			// Proceed to next page
 			page++
 		}
 	}
@@ -235,7 +320,7 @@ func fetchAndStoreVacancies(startDate, endDate string, collection *mongo.Collect
 	return nil
 }
 
-func fetchVacancyDetails(vacancyIDs []string, collection *mongo.Collection, bearerToken string) error {
+func fetchVacancyDetails(vacancyIDs []string, collection *mongo.Collection, bearerToken string, existingDescriptionHashes *SafeMap, savedCount *int64) error {
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, MaxConcurrency)
 
@@ -248,7 +333,7 @@ func fetchVacancyDetails(vacancyIDs []string, collection *mongo.Collection, bear
 			retries := 0
 
 			for {
-				err := processVacancy(vacancyID, collection, bearerToken)
+				err := processVacancy(vacancyID, collection, bearerToken, existingDescriptionHashes)
 				if err != nil {
 					if errors.Is(err, ErrRetryable) {
 						if retries < MaxRetries {
@@ -265,6 +350,9 @@ func fetchVacancyDetails(vacancyIDs []string, collection *mongo.Collection, bear
 						// Unknown error
 						errorLogger.Printf("Unknown error for vacancy %s: %v", vacancyID, err)
 					}
+				} else {
+					// Increment the saved count atomically
+					atomic.AddInt64(savedCount, 1)
 				}
 				break
 			}
@@ -280,7 +368,7 @@ var (
 	ErrNonRetryable = errors.New("non-retryable error")
 )
 
-func processVacancy(vacancyID string, collection *mongo.Collection, bearerToken string) error {
+func processVacancy(vacancyID string, collection *mongo.Collection, bearerToken string, existingDescriptionHashes *SafeMap) error {
 	vacancyURL := BaseVacancyURL + vacancyID
 
 	// Create HTTP request with Bearer token
@@ -308,17 +396,33 @@ func processVacancy(vacancyID string, collection *mongo.Collection, bearerToken 
 			return ErrRetryable
 		}
 
-		// Optional: Validate JSON structure if needed
-
-		// Insert into MongoDB
-		var vacancyData bson.M
+		// Parse JSON into a map
+		var vacancyData map[string]interface{}
 		err = json.Unmarshal(body, &vacancyData)
 		if err != nil {
 			errorLogger.Printf("Failed to parse JSON for vacancy %s: %v", vacancyID, err)
 			return ErrNonRetryable
 		}
 
-		// Insert with upsert to avoid duplicates
+		// Compute MD5 hash of the description field
+		description, ok := vacancyData["description"].(string)
+		if !ok {
+			errorLogger.Printf("Vacancy %s does not contain a valid 'description' field.", vacancyID)
+			return ErrNonRetryable
+		}
+		descriptionHash := md5Hash(description)
+
+		// Check if description_hash already exists
+		if existingDescriptionHashes.Exists(descriptionHash) {
+			// Duplicate description, skip saving
+			successLogger.Printf("Vacancy %s skipped due to duplicate description_hash.", vacancyID)
+			return nil
+		}
+
+		// Add description_hash to the vacancy data
+		vacancyData["description_hash"] = descriptionHash
+
+		// Insert into MongoDB
 		filter := bson.M{"id": vacancyData["id"]}
 		update := bson.M{"$set": vacancyData}
 		opts := options.Update().SetUpsert(true)
@@ -328,6 +432,9 @@ func processVacancy(vacancyID string, collection *mongo.Collection, bearerToken 
 			errorLogger.Printf("MongoDB insertion error for vacancy %s: %v", vacancyID, err)
 			return ErrRetryable
 		}
+
+		// Update the in-memory hash map to include the new hash
+		existingDescriptionHashes.Add(descriptionHash)
 
 		successLogger.Printf("Vacancy %s stored successfully.", vacancyID)
 		return nil
@@ -341,4 +448,9 @@ func processVacancy(vacancyID string, collection *mongo.Collection, bearerToken 
 		errorLogger.Printf("Unexpected HTTP status %d for vacancy %s", resp.StatusCode, vacancyID)
 		return ErrRetryable
 	}
+}
+
+func md5Hash(text string) string {
+	hash := md5.Sum([]byte(text))
+	return hex.EncodeToString(hash[:])
 }

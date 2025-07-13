@@ -16,13 +16,16 @@ RUN go build -o main .
 # Stage 2: Create the final image
 FROM alpine:latest
 
-RUN apk --no-cache add ca-certificates
+# Install necessary packages including coreutils
+RUN apk --no-cache add ca-certificates bash coreutils
 
 WORKDIR /app
 
 COPY --from=builder /app/main .
+COPY run_daily.sh .
 
-RUN chmod a+x ./main
+RUN chmod +x ./main
+RUN chmod +x ./run_daily.sh
 
 RUN mkdir logs
 
@@ -30,4 +33,4 @@ RUN touch logs/success.log logs/error.log
 
 ENV GO_ENV=production
 
-ENTRYPOINT ["/app/main"]
+ENTRYPOINT ["/app/run_daily.sh"]

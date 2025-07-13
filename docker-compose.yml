@@ -26,7 +26,7 @@ services:
       - ./logs:/app/logs
     networks:
       - mongodb_network
-    entrypoint: ["/app/main"] # Allows passing command-line arguments
+    entrypoint: ["/app/run_daily.sh"] # Changed to the bash script
 
 networks:
   mongodb_network:
