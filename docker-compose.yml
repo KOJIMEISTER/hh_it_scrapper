@@ -21,12 +21,13 @@ services:
       - mongodb
     environment:
       - MONGO_URI=mongodb://root:546258@mongodb:27017/vacancy_db?authSource=admin
-      - BEARER_TOKEN=${BEARER_TOKEN} # Ensure this is set in your environment or .env file
+      - BEARER_TOKEN=${BEARER_TOKEN} # Ensures BEARER_TOKEN is loaded from .env
+      - DOWNLOAD_30_DAYS=${DOWNLOAD_30_DAYS} # Add this line
     volumes:
       - ./logs:/app/logs
     networks:
       - mongodb_network
-    entrypoint: ["/app/run_daily.sh"] # Changed to the bash script
+    entrypoint: ["/app/run_daily.sh"] # Ensures the Bash script is used as the entrypoint
 
 networks:
   mongodb_network:

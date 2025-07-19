@@ -18,22 +18,26 @@ get_date_days_ago() {
     echo "$(date -u '+%Y-%m-%d')"
 }
 
-# Download data for the past 30 days by specifying 30 separate 1-day ranges
-echo "Starting data fetching for the past 30 days..."
-for i in $(seq 1 30); do
-    FROM_DATE=$(get_date_days_ago "$i")
-    TO_DATE=$(get_date_days_ago "$((i - 1))")
-    
-    echo "Fetching data from $FROM_DATE to $TO_DATE..."
-    $MAIN_EXECUTABLE --from "$FROM_DATE" --to "$TO_DATE"
-    
-    if [ $? -eq 0 ]; then
-        echo "Successfully fetched data for $FROM_DATE."
-    else
-        echo "Error fetching data for $FROM_DATE. Check logs for details."
-    fi
-done
-echo "Completed initial 30-day data fetching."
+# Check if DOWNLOAD_30_DAYS is set to true
+if [ "$DOWNLOAD_30_DAYS" = "true" ]; then
+    echo "Starting data fetching for the past 30 days..."
+    for i in $(seq 1 30); do
+        FROM_DATE=$(get_date_days_ago "$i")
+        TO_DATE=$(get_date_days_ago "$((i - 1))")
+        
+        echo "Fetching data from $FROM_DATE to $TO_DATE..."
+        $MAIN_EXECUTABLE --from "$FROM_DATE" --to "$TO_DATE"
+        
+        if [ $? -eq 0 ]; then
+            echo "Successfully fetched data for $FROM_DATE."
+        else
+            echo "Error fetching data for $FROM_DATE. Check logs for details."
+        fi
+    done
+    echo "Completed initial 30-day data fetching."
+else
+    echo "Skipping initial 30-day data fetching as per configuration."
+fi
 
 # Infinite loop to run the job daily
 while true
