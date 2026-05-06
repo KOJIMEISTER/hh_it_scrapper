@@ -1,0 +1,18 @@
+# to etc/systemd/system/...
+[Unit]
+Description=Vacancy Parser Docker Compose Service
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/user/projects/hh_it_scrapper # your path to project
+
+ExecStartPre=/usr/bin/docker compose up -d --wait mongodb
+
+ExecStart=/usr/bin/docker compose run --rm app -erronly=true
+
+ExecStopPost=/usr/bin/docker compose down -v
+
+[Install]
+WantedBy=multi-user.target

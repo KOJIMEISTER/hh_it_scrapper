@@ -23,8 +23,9 @@ type AppConfig struct {
 func LoadConfig() *AppConfig {
 	fromDate := time.Now().AddDate(0, 0, -2).Format("2006-01-02")
 	from := flag.String("from", fromDate, "Start date in YYYY-MM-DD format")
-	to := flag.String("to", "", "End date in YYYY-MM-DD format")
-	errorOnly := flag.Bool("--erronly", true, "Log only errors")
+	toDate := time.Now().Format("2006-01-02")
+	to := flag.String("to", toDate, "End date in YYYY-MM-DD format")
+	errorOnly := flag.Bool("erronly", false, "Log only errors")
 	flag.Parse()
 
 	return &AppConfig{

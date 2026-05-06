@@ -23,9 +23,11 @@ WORKDIR /app
 
 COPY --from=builder /app/main .
 COPY run_daily.sh .
+COPY entrypoint.sh .
 
 RUN chmod +x ./main
 RUN chmod +x ./run_daily.sh
+RUN chmod +x ./entrypoint.sh
 
 RUN mkdir logs
 
@@ -33,4 +35,6 @@ RUN touch logs/success.log logs/error.log
 
 ENV GO_ENV=production
 
-ENTRYPOINT ["/app/run_daily.sh"]
+ENTRYPOINT ["/app/entrypoint.sh"]
+
+CMD ["--daemon"]
