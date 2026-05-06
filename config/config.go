@@ -18,6 +18,7 @@ type AppConfig struct {
 	Area             string
 	ProfessionalRole string
 	ErrorOnly        bool
+	SearchText       string
 }
 
 func LoadConfig() *AppConfig {
@@ -26,6 +27,8 @@ func LoadConfig() *AppConfig {
 	toDate := time.Now().Format("2006-01-02")
 	to := flag.String("to", toDate, "End date in YYYY-MM-DD format")
 	errorOnly := flag.Bool("erronly", false, "Log only errors")
+	area := flag.String("area", "1", "Vacancies area")
+	text := flag.String("text", "C%2B%2B+or+golang", "Search by text")
 	flag.Parse()
 
 	return &AppConfig{
@@ -37,8 +40,9 @@ func LoadConfig() *AppConfig {
 		RetryDelay:       10 * time.Second,
 		Concurrency:      10,
 		PerPage:          100,
-		Area:             "113",
+		Area:             *area,
 		ProfessionalRole: "96",
 		ErrorOnly:        *errorOnly,
+		SearchText:       *text,
 	}
 }

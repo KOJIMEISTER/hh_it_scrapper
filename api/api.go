@@ -29,29 +29,29 @@ func NewHHClient(bearerToken string) *HHClient {
 	}
 }
 
-func (c *HHClient) GetVacancyIDs(ctx context.Context, startDate, endDate, area, role string, page, perPage int) ([]string, int, error) {
-	searchURL := fmt.Sprintf("%s?area=%s&professional_role=%s&date_from=%s&date_to=%s&per_page=%d&page=%d",
-		BaseSearchURL, area, role, startDate, endDate, perPage, page)
+func (c *HHClient) GetVacancyIDs(ctx context.Context, startDate, endDate, area, role string, page, perPage int, searchText string) ([]string, int, error) {
+	searchURL := fmt.Sprintf("%s?area=%s&professional_role=%s&date_from=%s&date_to=%s&per_page=%d&page=%d&text=%s",
+		BaseSearchURL, area, role, startDate, endDate, perPage, page, searchText)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to create request: %w", err)
+		return nil, 0, fmt.Errorf("failed to create request: %w, url: %s", err, searchURL)
 	}
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.BearerToken))
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return nil, 0, fmt.Errorf("HTTP request failed: %w", err)
+		return nil, 0, fmt.Errorf("HTTP request failed: %w, url: %s", err, searchURL)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, 0, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return nil, 0, fmt.Errorf("unexpected status code: %d, url: %s", resp.StatusCode, searchURL)
 	}
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to read response body: %w", err)
+		return nil, 0, fmt.Errorf("failed to read response body: %w, url: %s", err, searchURL)
 	}
 
 	var searchResp struct {

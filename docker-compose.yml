@@ -1,4 +1,56 @@
 services:
+  chartbrew_db:
+    image: mysql:8.0
+    container_name: chartbrew_db
+    restart: unless-stopped
+    profiles:
+      - analytics
+    environment:
+      MYSQL_DATABASE: chartbrew
+      MYSQL_ROOT_PASSWORD: chartbrew_password
+    volumes:
+      - chartbrew_data:/var/lib/mysql
+    networks:
+      - mongodb_network
+
+  chartbrew_redis:
+    image: redis:alpine
+    container_name: chartbrew_redis
+    restart: unless-stopped
+    profiles:
+      - analytics
+    networks:
+      - mongodb_network
+
+  chartbrew:
+    image: razvanilin/chartbrew:latest
+    container_name: chartbrew
+    restart: unless-stopped
+    profiles:
+      - analytics
+    ports:
+      - "4018:4018" # Web UI
+      - "4019:4019" # API
+    depends_on:
+      - chartbrew_db
+      - chartbrew_redis
+    environment:
+      - CB_DB_HOST=chartbrew_db
+      - CB_DB_PORT=3306
+      - CB_DB_NAME=chartbrew
+      - CB_DB_USERNAME=root
+      - CB_DB_PASSWORD=chartbrew_password
+      - CB_REDIS_HOST=chartbrew_redis
+      - CB_REDIS_PORT=6379
+      - CB_ENCRYPTION_KEY=${CHARTBREW_ENCRYPTION_KEY}
+      - VITE_APP_CLIENT_HOST=http://localhost:4018
+      - VITE_APP_CLIENT_PORT=4018
+      - VITE_APP_API_HOST=http://localhost:4019
+      - CB_API_HOST=0.0.0.0
+      - CB_API_PORT=4019
+    networks:
+      - mongodb_network
+
   mongodb:
     image: mongo:latest
     container_name: mongodb
@@ -14,7 +66,7 @@ services:
     networks:
       - mongodb_network
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongosh mongodb://root:546258@localhost:27017/vacancy_db?authSource=admin --quiet
+      test: echo 'db.runCommand("ping").ok' | mongosh ${MONGO_URI} --quiet
       interval: 5s
       timeout: 5s
       retries: 5
@@ -29,7 +81,7 @@ services:
       mongodb:
         condition: service_healthy
     environment:
-      - MONGO_URI=mongodb://root:546258@mongodb:27017/vacancy_db?authSource=admin
+      - MONGO_URI=${MONGO_URI}
       - BEARER_TOKEN=${BEARER_TOKEN} # Ensures BEARER_TOKEN is loaded from .env
       - DOWNLOAD_30_DAYS=${DOWNLOAD_30_DAYS}
     volumes:
@@ -40,3 +92,6 @@ services:
 networks:
   mongodb_network:
     driver: bridge
+  
+volumes:
+  chartbrew_data:

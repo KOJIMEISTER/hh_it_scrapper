@@ -21,6 +21,7 @@ type ProcessorConfig struct {
 	PerPage          int
 	MaxRetries       int
 	RetryDelay       time.Duration
+	SearchText       string
 }
 
 func NewProcessorConfig(cfg *config.AppConfig) *ProcessorConfig {
@@ -32,6 +33,7 @@ func NewProcessorConfig(cfg *config.AppConfig) *ProcessorConfig {
 		PerPage:          cfg.PerPage,
 		MaxRetries:       cfg.MaxRetries,
 		RetryDelay:       cfg.RetryDelay,
+		SearchText:       cfg.SearchText,
 	}
 }
 
@@ -56,7 +58,7 @@ func (this *Processor) FetchAndStoreVacancies(ctx context.Context) (int64, error
 		case <-ctx.Done():
 			return atomic.LoadInt64(&savedCount), ctx.Err()
 		default:
-			vacancyIDs, pages, err := this.client.GetVacancyIDs(ctx, this.cfg.StartDate, this.cfg.EndDate, this.cfg.Area, this.cfg.ProfessionalRole, page, this.cfg.PerPage)
+			vacancyIDs, pages, err := this.client.GetVacancyIDs(ctx, this.cfg.StartDate, this.cfg.EndDate, this.cfg.Area, this.cfg.ProfessionalRole, page, this.cfg.PerPage, this.cfg.SearchText)
 			if err != nil {
 				this.logger.Error.Printf("Failed to fetch search page %d: %v", page, err)
 				page++

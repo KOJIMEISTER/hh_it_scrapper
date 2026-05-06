@@ -2,7 +2,7 @@
 
 set -e
 
-if [ "$1" = "--daemon" ]; then
+if [ "$1" = "daemon" ]; then
     echo "Deamon mode"
     exec /app/run_daily.sh
 fi

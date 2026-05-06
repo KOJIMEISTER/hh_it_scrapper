@@ -37,4 +37,4 @@ ENV GO_ENV=production
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 
-CMD ["--daemon"]
+CMD ["daemon"]
