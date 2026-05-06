@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"io"
 	"log"
 	"os"
 )
@@ -10,14 +11,19 @@ type AppLogger struct {
 	Error *log.Logger
 }
 
-func NewAppLogger() *AppLogger {
+func NewAppLogger(errOnly bool) *AppLogger {
+
 	if err := os.MkdirAll("logs", os.ModePerm); err != nil {
 		log.Fatalf("Failed to create logs directory: %v", err)
 	}
 
-	infoFile, err := os.OpenFile("logs/info.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
-	if err != nil {
-		log.Fatalf("Failed to open info log file: %v", err)
+	infoFile := io.Discard
+	if !errOnly {
+		file, err := os.OpenFile("logs/info.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+		if err != nil {
+			log.Fatalf("Failed to open info log file: %v", err)
+		}
+		infoFile = file
 	}
 
 	errorFile, err := os.OpenFile("logs/error.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)

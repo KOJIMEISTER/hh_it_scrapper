@@ -17,9 +17,7 @@ import (
 
 func main() {
 	cfg := config.LoadConfig()
-	if cfg.StartDate == "" || cfg.EndDate == "" {
-		log.Fatal("Both --from and --to date arguments must be provided")
-	}
+
 	if cfg.BearerToken == "" {
 		log.Fatal("BEARER_TOKEN must be provided")
 	}
@@ -29,6 +27,7 @@ func main() {
 
 	logger := logger.NewAppLogger()
 	mongoStore, err := storage.NewMongoStore(cfg.MongoURI, "vacancy_db", "vacancies")
+
 	if err != nil {
 		logger.Error.Fatalf("MongoDB connection error: %v", err)
 	}

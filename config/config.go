@@ -17,11 +17,14 @@ type AppConfig struct {
 	PerPage          int
 	Area             string
 	ProfessionalRole string
+	ErrorOnly        bool
 }
 
 func LoadConfig() *AppConfig {
-	from := flag.String("from", "", "Start date in YYYY-MM-DD format (required)")
-	to := flag.String("to", "", "End date in YYYY-MM-DD format (required)")
+	fromDate := time.Now().AddDate(0, 0, -2).Format("2006-01-02")
+	from := flag.String("from", fromDate, "Start date in YYYY-MM-DD format")
+	to := flag.String("to", "", "End date in YYYY-MM-DD format")
+	errorOnly := flag.Bool("--erronly", true, "Log only errors")
 	flag.Parse()
 
 	return &AppConfig{
@@ -35,5 +38,6 @@ func LoadConfig() *AppConfig {
 		PerPage:          100,
 		Area:             "113",
 		ProfessionalRole: "96",
+		ErrorOnly:        *errorOnly,
 	}
 }
