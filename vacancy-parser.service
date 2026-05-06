@@ -6,7 +6,7 @@ After=docker.service
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/user/projects/hh_it_scrapper # your path to project
+WorkingDirectory=/home/user/projects/hh_it_scrapper/
 
 ExecStartPre=/usr/bin/docker compose up -d --wait mongodb
 
